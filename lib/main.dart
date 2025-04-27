@@ -35,12 +35,29 @@ class MainPage extends StatelessWidget {
   final FaceStorage storage = FaceStorage();
   final FaceDetectorService detector = FaceDetectorService();
 
-  void _register(BuildContext context) async {
-    String userName = ''; // À adapter si tu veux saisir le nom avant
+  // void _register(BuildContext context) async {
+  //   String userName = ''; // À adapter si tu veux saisir le nom avant
+  //
+  //   Navigator.push(context, MaterialPageRoute(builder: (context) => CameraScreen(
+  //     isRegisterScreen: true,
+  //     userName: userName,
+  //     onPictureTaken: (XFile image, String userName) async {
+  //       File file = File(image.path);
+  //       List<double> faceData = await detector.extractFaceData(file);
+  //       await storage.saveFaceData(userName, faceData);
+  //
+  //       List<double>? savedFaceData = await storage.getFaceData(userName);
+  //       print("Nom d'utilisateur: $userName");
+  //       print("Données du visage: $savedFaceData");
+  //
+  //       Navigator.pop(context);
+  //     },
+  //   )));
+  // }
 
+  void _register(BuildContext context) async {
     Navigator.push(context, MaterialPageRoute(builder: (context) => CameraScreen(
       isRegisterScreen: true,
-      userName: userName,
       onPictureTaken: (XFile image, String userName) async {
         File file = File(image.path);
         List<double> faceData = await detector.extractFaceData(file);
@@ -50,9 +67,16 @@ class MainPage extends StatelessWidget {
         print("Nom d'utilisateur: $userName");
         print("Données du visage: $savedFaceData");
 
-        Navigator.pop(context);
+        // Retourne à MainPage avec le nom d'utilisateur
+        Navigator.of(context).pop(userName);
       },
-    )));
+    ))).then((userName) {
+      if (userName != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Enregistrement réussi pour $userName!"))
+        );
+      }
+    });
   }
 
   void _authenticate(BuildContext context) async {
@@ -62,21 +86,23 @@ class MainPage extends StatelessWidget {
         File file = File(image.path);
         List<double> faceData = await detector.extractFaceData(file);
         String? name = await storage.authenticateFace(faceData);
-        Navigator.pop(context);
 
         if (name != null) {
-          List<double>? savedFaceData = await storage.getFaceData(name);
-          print("Nom d'utilisateur authentifié: $name");
-          print("Données du visage: $faceData");
-
-          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomePage(user: name)));
+          // Redirection directe vers HomePage sans AlertDialog
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => HomePage(user: name)),
+          );
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Visage non reconnu ou données supprimées")));
+          // Retour à l'écran précédent et affichage d'un message d'erreur
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Visage non reconnu ou données supprimées")),
+          );
         }
       },
     )));
   }
-
   void _deleteUserData(BuildContext context, String userName) async {
     await storage.deleteFaceData(userName);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Données supprimées pour $userName")));
