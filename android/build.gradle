@@ -1,3 +1,14 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:7.3.1' // Version compatible
+        classpath 'com.google.gms:google-services:4.3.15' // Version critique
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.7.20" // Version Kotlin
+    }
+}
 allprojects {
     repositories {
         google()

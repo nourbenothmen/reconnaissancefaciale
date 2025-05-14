@@ -52,7 +52,7 @@ class MainPage extends StatefulWidget {
 }
 
 class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
-  final FaceStorage storage = FaceStorage();
+  final FaceStorageFirebase storage = FaceStorageFirebase();
   final FaceDetectorService detector = FaceDetectorService();
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -88,22 +88,19 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
     Navigator.push(context, PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => CameraScreen(
         isRegisterScreen: true, // Mode enregistrement
-        onPictureTaken: (XFile image, String userName) async {
-          // 1. Convertit l'image en File
+        onPictureTaken: (XFile image, Map<String, dynamic> patientData) async {
           File file = File(image.path);
-
-          // 2. Extrait les caractéristiques du visage
           List<double> faceData = await detector.extractFaceData(file);
 
-          // 3. Sauvegarde dans SharedPreferences/Firestore
-          await storage.saveFaceData(userName, faceData);
+          await storage.savePatientData(
+            patientData['firstName'],
+            patientData['lastName'],
+            patientData['phone'],
+            patientData['birthDate'],
+            faceData,
+          );
 
-          // 4. Vérification (debug)
-          List<double>? savedFaceData = await storage.getFaceData(userName);
-          print("Données enregistrées : $savedFaceData");
-
-          // 5. Retour à l'écran précédent
-          Navigator.of(context).pop(userName);
+          Navigator.of(context).pop();
         },
       ),
       // Animation de transition (glissement)
@@ -130,51 +127,64 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
       }
     });
   }
+
   void _authenticate(BuildContext context) async {
-    Navigator.push(context, PageRouteBuilder(
-      pageBuilder: (context, animation, secondaryAnimation) => CameraScreen(
-        isRegisterScreen: false, // Mode authentification
-        onPictureTaken: (XFile image, String userName) async {
-          File file = File(image.path);
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => CameraScreen(
+          isRegisterScreen: false,
+          onPictureTaken: (XFile image, _) async {
+            try {
+              File file = File(image.path);
+              List<double> faceData = await detector.extractFaceData(file);
+              String? patientId = await storage.authenticateFace(faceData);
 
-          // 1. Extrait les caractéristiques du visage
-          List<double> faceData = await detector.extractFaceData(file);
+              if (patientId != null) {
+                try {
+                  Map<String, dynamic> patientData = await storage.getPatientData(patientId);
 
-          // 2. Compare avec la base de données
-          String? name = await storage.authenticateFace(faceData);
-
-          if (name != null) {
-            // 3. Succès -> Redirection vers HomePage
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => HomePage(user: name)),
-            );
-          } else {
-            // 4. Échec -> Retour + message d'erreur
-            Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Row(children: [
-                  Icon(Icons.error, color: Colors.white),
-                  Text("Visage non reconnu"),
-                ]),
-                backgroundColor: Colors.redAccent,
-              ),
-            );
-          }
-        },
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => HomePage(
+                        user: '${patientData['firstName']} ${patientData['lastName']}',
+                        patientData: patientData,
+                      ),
+                    ),
+                  );
+                } catch (e) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text("Erreur de chargement des données: ${e.toString()}"),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
+              } else {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("Aucun patient trouvé"),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            } catch (e) {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("Erreur technique: ${e.toString()}"),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          },
+        ),
       ),
-      // Même animation que _register
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(1.0, 0.0);
-        const end = Offset.zero;
-        const curve = Curves.easeInOut;
-        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-        return SlideTransition(position: animation.drive(tween), child: child);
-      },
-    ));
+    );
   }
-
   void _deleteUserData(BuildContext context, String userName) async {
     await storage.deleteFaceData(userName);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -251,7 +261,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
               const SizedBox(height: 40),
               AnimatedButton(
                 icon: Icons.app_registration,
-                label: "S'inscrire",
+                label: "Nouveau patient",
                 color: Colors.cyan,
                 onPressed: () => _register(context),
               ),

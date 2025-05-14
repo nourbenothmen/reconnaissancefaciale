@@ -4,17 +4,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lottie/lottie.dart';
 import 'package:flutter/gestures.dart';
 import 'dart:math';
+import 'package:intl/intl.dart';
 
 class CameraScreen extends StatefulWidget {
-  final Function(XFile, String) onPictureTaken; // Callback après capture
-  final bool isRegisterScreen; // Mode enregistrement ou authentification
-  final String? userName; // Optionnel : nom d'utilisateur pour l'enregistrement
+  final Function(XFile, Map<String, dynamic>) onPictureTaken; // Modifié pour accepter une Map
+  final bool isRegisterScreen;
 
   const CameraScreen({
     Key? key,
     required this.onPictureTaken,
     this.isRegisterScreen = false,
-    this.userName,
   }) : super(key: key);
 
   @override
@@ -24,7 +23,10 @@ class CameraScreen extends StatefulWidget {
 class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMixin {
   late CameraController _controller;
   late Future<void> _initializeControllerFuture;
-  final TextEditingController _textController = TextEditingController();
+  final TextEditingController _firstNameController = TextEditingController();
+  final TextEditingController _lastNameController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  DateTime? _birthDate;
   bool isProcessing = false;
   bool _showInstructions = true;
   late AnimationController _lottieController;
@@ -41,7 +43,6 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
       if (mounted) setState(() => _showInstructions = false);
     });
 
-    // Initialize animation controllers
     _lottieController = AnimationController(vsync: this, duration: const Duration(seconds: 2));
     _fadeController = AnimationController(vsync: this, duration: const Duration(seconds: 1));
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -56,38 +57,44 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
 
   Future<void> _initializeCamera() async {
     try {
-      // 1. Liste toutes les caméras disponibles
       final cameras = await availableCameras();
-
-      // 2. Vérifie qu'au moins une caméra existe
       if (cameras.isEmpty) throw Exception("Aucune caméra disponible");
 
-      // 3. Privilégie la caméra frontale, sinon prend la première
       final frontCamera = cameras.firstWhere(
             (camera) => camera.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
       );
 
-      // 4. Initialise le contrôleur avec la résolution maximale
       _controller = CameraController(frontCamera, ResolutionPreset.high);
       await _controller.initialize();
 
-      // 5. Rafraîchit l'UI si le widget est toujours monté
       if (mounted) setState(() {});
-
     } catch (e) {
       print("Erreur d'initialisation: $e");
-      // Note: En production, ajouter un SnackBar d'erreur
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Erreur caméra: ${e.toString()}")),
+      );
     }
   }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null && picked != _birthDate) {
+      setState(() => _birthDate = picked);
+    }
+  }
+
   @override
   void dispose() {
-    _controller.dispose().then((_) {
-      print("Camera controller fully disposed");
-    }).catchError((e) {
-      print("Error disposing camera: $e");
-    });
-    _textController.dispose();
+    _controller.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _phoneController.dispose();
     _lottieController.dispose();
     _fadeController.dispose();
     _particleController.dispose();
@@ -96,75 +103,45 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
 
   Future<void> _captureImage() async {
     if (!isProcessing && _controller.value.isInitialized) {
-      setState(() {
-        isProcessing = true;
-        _lottieController.forward();
-      });
+      setState(() => isProcessing = true);
+      _lottieController.forward();
 
       try {
         await _initializeControllerFuture;
         XFile image = await _controller.takePicture();
 
-        if (widget.isRegisterScreen && _textController.text.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Container(
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.8,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.warning, color: Colors.white, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        "Veuillez entrer un nom",
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
+        if (widget.isRegisterScreen) {
+          if (_firstNameController.text.isEmpty ||
+              _lastNameController.text.isEmpty ||
+              _phoneController.text.isEmpty ||
+              _birthDate == null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text("Veuillez remplir tous les champs", style: GoogleFonts.poppins()),
+                backgroundColor: Colors.orange,
               ),
-              backgroundColor: Colors.orange,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 2),
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          );
-          setState(() {
-            isProcessing = false;
-            _lottieController.reset();
-          });
-          return;
+            );
+            return;
+          }
+          Map<String, dynamic> patientData = {
+            'firstName': _firstNameController.text.trim(),
+            'lastName': _lastNameController.text.trim(),
+            'phone': _phoneController.text.trim(),
+            'birthDate': _birthDate?.toIso8601String() ?? '',
+          };
+
+          await widget.onPictureTaken(image, patientData);
+        } else {
+          await widget.onPictureTaken(image, {});
         }
 
-        String userName = widget.isRegisterScreen ? _textController.text.trim() : '';
-        await widget.onPictureTaken(image, userName);
         _particleController.forward(from: 0);
       } catch (e) {
-        print("Erreur de capture : $e");
+        print("Erreur de capture: $e");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error, color: Colors.white),
-                const SizedBox(width: 10),
-                Text(
-                  "Erreur lors de la capture: ${e.toString()}",
-                  style: GoogleFonts.poppins(color: Colors.white),
-                ),
-              ],
-            ),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
+            content: Text("Erreur: ${e.toString()}", style: GoogleFonts.poppins()),
+            backgroundColor: Colors.red,
           ),
         );
       } finally {
@@ -178,6 +155,51 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
     }
   }
 
+  Widget _buildTextField(TextEditingController controller, String hint, IconData icon) {
+    return TextField(
+      controller: controller,
+      style: GoogleFonts.poppins(color: Colors.white),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: GoogleFonts.poppins(color: Colors.white70),
+        filled: true,
+        fillColor: Colors.indigo.withOpacity(0.3),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(20),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+        prefixIcon: Icon(icon, color: Colors.cyan),
+      ),
+    );
+  }
+  Widget _buildDatePicker() {
+    return InkWell(
+      onTap: () => _selectDate(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.indigo.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.calendar_today, color: Colors.cyan),
+            const SizedBox(width: 16),
+            Text(
+              _birthDate != null
+                  ? "Naissance: ${DateFormat('dd/MM/yyyy').format(_birthDate!)}"
+                  : "Sélectionnez la date",
+              style: GoogleFonts.poppins(
+                color: _birthDate != null ? Colors.white : Colors.white70,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _cameraPreviewWidget() {
     if (!_controller.value.isInitialized) {
       return Center(
@@ -187,7 +209,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
             Lottie.asset('assets/scanning.json', width: 100, height: 100, repeat: true),
             const SizedBox(height: 10),
             Text(
-              "Initialisation de la caméra...",
+              "Initialisation caméra...",
               style: GoogleFonts.poppins(fontSize: 16, color: Colors.white),
             ),
           ],
@@ -256,7 +278,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.isRegisterScreen ? "Enregistrement facial" : "Authentification",
+          widget.isRegisterScreen ? "Enregistrement patient" : "Authentification",
           style: GoogleFonts.poppins(
             fontSize: 22,
             fontWeight: FontWeight.bold,
@@ -281,10 +303,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
       ),
       body: Stack(
         children: [
-          // Full-screen gradient background
           Container(
-            width: double.infinity,
-            height: double.infinity,
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
@@ -293,33 +312,39 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
               ),
             ),
           ),
-          // Content with SafeArea
           SafeArea(
             child: Column(
               children: [
                 if (widget.isRegisterScreen)
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: TextField(
-                      controller: _textController,
-                      style: GoogleFonts.poppins(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: "Votre nom d'utilisateur...",
-                        hintStyle: GoogleFonts.poppins(color: Colors.white70),
-                        filled: true,
-                        fillColor: Colors.indigo.withOpacity(0.3),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(20),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                        prefixIcon: const Icon(Icons.person, color: Colors.cyan),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          Text(
+                            "Informations patient",
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          _buildTextField(_firstNameController, "Prénom", Icons.person),
+                          const SizedBox(height: 15),
+                          _buildTextField(_lastNameController, "Nom", Icons.person_outline),
+                          const SizedBox(height: 15),
+                          _buildTextField(_phoneController, "Téléphone", Icons.phone),
+                          const SizedBox(height: 15),
+                          _buildDatePicker(),
+                        ],
                       ),
                     ),
                   ),
                 Expanded(
+                  flex: 2,
                   child: Container(
-                    margin: const EdgeInsets.only(left: 10, right: 10),
+                    margin: const EdgeInsets.symmetric(horizontal: 10),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(15),
                       boxShadow: [
@@ -343,7 +368,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
                                 const Icon(Icons.error, color: Colors.red, size: 50),
                                 const SizedBox(height: 20),
                                 Text(
-                                  'Erreur de la caméra',
+                                  'Erreur caméra',
                                   style: GoogleFonts.poppins(
                                     color: Colors.white,
                                     fontSize: 18,
@@ -378,7 +403,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
                               Lottie.asset('assets/scanning.json', width: 100, height: 100, repeat: true),
                               const SizedBox(height: 10),
                               Text(
-                                "Initialisation de la caméra...",
+                                "Initialisation...",
                                 style: GoogleFonts.poppins(fontSize: 16, color: Colors.white),
                               ),
                             ],
@@ -503,7 +528,6 @@ class _AnimatedButtonState extends State<AnimatedButton> with SingleTickerProvid
 
 class ParticlePainter extends CustomPainter {
   final double animationValue;
-
   ParticlePainter(this.animationValue);
 
   @override
