@@ -25,6 +25,7 @@ class RDVScreen extends StatefulWidget {
 class _RDVScreenState extends State<RDVScreen> with TickerProviderStateMixin {
   late final DateFormat _dateFormat = DateFormat('dd/MM/yyyy');
   late final DateFormat _timeFormat = DateFormat('HH:mm');
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
@@ -36,145 +37,16 @@ class _RDVScreenState extends State<RDVScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  void _scheduleAppointment() async {
-    DateTime? selectedDate = DateTime.now();
-    TimeOfDay? selectedTime = TimeOfDay.now();
-
-    final DateTime? pickedDate = await showDatePicker(
-      context: context,
-      initialDate: selectedDate,
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2026),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Color(0xFF1E90FF),
-              onPrimary: Colors.white,
-              onSurface: Colors.black,
-            ),
-            textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF1E90FF),
-              ),
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (pickedDate != null) {
-      selectedDate = pickedDate;
-    }
-
-    final TimeOfDay? pickedTime = await showTimePicker(
-      context: context,
-      initialTime: selectedTime,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Color(0xFF1E90FF),
-              onPrimary: Colors.white,
-              onSurface: Colors.black,
-            ),
-            textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF1E90FF),
-              ),
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (pickedTime != null) {
-      selectedTime = pickedTime;
-    }
-
-    if (selectedDate != null && selectedTime != null) {
-      final scheduledDateTime = DateTime(
-        selectedDate.year,
-        selectedDate.month,
-        selectedDate.day,
-        selectedTime.hour,
-        selectedTime.minute,
-      );
-      if (scheduledDateTime.isBefore(DateTime.now())) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Veuillez choisir une date et heure futures."),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      final TimeOfDay confirmedTime = selectedTime;
-
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text("Confirmer le rendez-vous"),
-          content: Text(
-            "Rendez-vous programmé pour :\n"
-                "${_dateFormat.format(scheduledDateTime)} à "
-                "${confirmedTime.format(context)}",
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Annuler"),
-            ),
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                final faceStorage = FaceStorageFirebase();
-                try {
-                  await faceStorage.addVisit(widget.patientId, scheduledDateTime);
-                  widget.onVisitAdded?.call(); // Notify MainPage to refresh
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          "Rendez-vous programmé pour le ${_dateFormat.format(scheduledDateTime)} à ${confirmedTime.format(context)}",
-                        ),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("Erreur lors de l'enregistrement du rendez-vous."),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                }
-              },
-              child: const Text("Confirmer"),
-            ),
-          ],
-        ),
-      );
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Aucun rendez-vous sélectionné."),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+  // Fonction pour récupérer tous les patients et filtrer les rendez-vous du jour
+  Stream<QuerySnapshot> _getPatients() {
+    return _firestore.collection('patients').snapshots();
   }
 
   @override
   Widget build(BuildContext context) {
+    // Format today's date for comparison
+    String today = _dateFormat.format(DateTime.now());
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -217,7 +89,7 @@ class _RDVScreenState extends State<RDVScreen> with TickerProviderStateMixin {
                   Text(
                     "Bienvenue, ${widget.user}",
                     style: GoogleFonts.poppins(
-                      fontSize: 19,
+                      fontSize: 15,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
                     ),
@@ -265,15 +137,248 @@ class _RDVScreenState extends State<RDVScreen> with TickerProviderStateMixin {
                     ),
                   ],
                 ),
-                child: const Text(
-                  "Liste des rendez-vous (à implémenter)",
-                  style: TextStyle(fontSize: 16, color: Colors.black87),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Rendez-vous du jour",
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF1E90FF),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    StreamBuilder<QuerySnapshot>(
+                      stream: _getPatients(),
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return Text('Erreur: ${snapshot.error}', style: GoogleFonts.poppins());
+                        }
+
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+
+                        // List to store all visits for today across all patients
+                        List<Map<String, dynamic>> todayVisits = [];
+
+                        // Iterate over all patients
+                        for (var patientDoc in snapshot.data!.docs) {
+                          var patientData = patientDoc.data() as Map<String, dynamic>;
+                          var listeVisites = patientData['listeVisites'] as List<dynamic>? ?? [];
+
+                          // Filter visits for today
+                          for (var visit in listeVisites) {
+                            if (visit['date'] == today) {
+                              todayVisits.add({
+                                'firstName': patientData['firstName'] ?? 'Prénom inconnu',
+                                'lastName': patientData['lastName'] ?? 'Nom inconnu',
+                                'visitDate': visit['date'],
+                                'visitTime': visit['time'],
+                              });
+                            }
+                          }
+                        }
+
+                        if (todayVisits.isEmpty) {
+                          return Text(
+                            "Aucun rendez-vous prévu pour aujourd'hui",
+                            style: GoogleFonts.poppins(color: Colors.grey),
+                          );
+                        }
+
+                        return ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: todayVisits.length,
+                          itemBuilder: (context, index) {
+                            var visit = todayVisits[index];
+                            return Card(
+                              margin: const EdgeInsets.symmetric(vertical: 5),
+                              child: ListTile(
+                                leading: const Icon(Icons.person, color: Color(0xFF1E90FF)),
+                                title: Text(
+                                  "${visit['firstName']} ${visit['lastName']}",
+                                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                                ),
+                                subtitle: Text(
+                                  "${visit['visitDate']} à ${visit['visitTime']}",
+                                  style: GoogleFonts.poppins(),
+                                ),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.notifications, color: Colors.orange),
+                                  onPressed: () {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          "Rappel envoyé pour ${visit['firstName']} ${visit['lastName']} à ${visit['visitTime']}",
+                                          style: GoogleFonts.poppins(),
+                                        ),
+                                        backgroundColor: Colors.orange,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ),
+              const SizedBox(height: 20),
             ],
           ),
         ),
       ),
     );
+  }
+
+  void _scheduleAppointment() async {
+    DateTime? selectedDate = DateTime.now();
+    TimeOfDay? selectedTime = TimeOfDay.now();
+
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: selectedDate,
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2026),
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF1E90FF),
+              onPrimary: Colors.white,
+              onSurface: Colors.black,
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF1E90FF),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (pickedDate != null) {
+      selectedDate = pickedDate;
+    }
+
+    final TimeOfDay? pickedTime = await showTimePicker(
+      context: context,
+      initialTime: selectedTime,
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF1E90FF),
+              onPrimary: Colors.white,
+              onSurface: Colors.black,
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF1E90FF),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (pickedTime != null) {
+      selectedTime = pickedTime;
+    }
+
+    if (selectedDate != null && selectedTime != null) {
+      final scheduledDateTime = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        selectedTime.hour,
+        selectedTime.minute,
+      );
+      if (scheduledDateTime.isBefore(DateTime.now())) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Veuillez choisir une date et heure futures."),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      final TimeOfDay confirmedTime = selectedTime;
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text("Confirmer le rendez-vous", style: GoogleFonts.poppins()),
+          content: Text(
+            "Rendez-vous programmé pour :\n"
+                "${_dateFormat.format(scheduledDateTime)} à "
+                "${confirmedTime.format(context)}",
+            style: GoogleFonts.poppins(),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text("Annuler", style: GoogleFonts.poppins()),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                final faceStorage = FaceStorageFirebase();
+                try {
+                  await faceStorage.addVisit(widget.patientId, scheduledDateTime);
+                  widget.onVisitAdded?.call(); // Notify MainPage to refresh
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          "Rendez-vous programmé pour le ${_dateFormat.format(scheduledDateTime)} à ${confirmedTime.format(context)}",
+                          style: GoogleFonts.poppins(),
+                        ),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          "Erreur lors de l'enregistrement du rendez-vous: $e",
+                          style: GoogleFonts.poppins(),
+                        ),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+              child: Text("Confirmer", style: GoogleFonts.poppins()),
+            ),
+          ],
+        ),
+      );
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "Aucun rendez-vous sélectionné.",
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }
