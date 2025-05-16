@@ -7,7 +7,7 @@ import 'dart:math';
 import 'package:intl/intl.dart';
 
 class CameraScreen extends StatefulWidget {
-  final Function(XFile, Map<String, dynamic>) onPictureTaken; // Modifié pour accepter une Map
+  final Function(XFile, Map<String, dynamic>) onPictureTaken;
   final bool isRegisterScreen;
 
   const CameraScreen({
@@ -35,11 +35,13 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
   late AnimationController _particleController;
   late Animation<double> _particleAnimation;
 
+  final Color dodgerBlue = const Color(0xFF1E90FF);
+
   @override
   void initState() {
     super.initState();
     _initializeControllerFuture = _initializeCamera();
-    Future.delayed(Duration(seconds: 3), () {
+    Future.delayed(const Duration(seconds: 3), () {
       if (mounted) setState(() => _showInstructions = false);
     });
 
@@ -83,6 +85,21 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
       initialDate: DateTime.now(),
       firstDate: DateTime(1900),
       lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: dodgerBlue,
+              onPrimary: Colors.white,
+              onSurface: Colors.black,
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(foregroundColor: dodgerBlue),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
     if (picked != null && picked != _birthDate) {
       setState(() => _birthDate = picked);
@@ -121,6 +138,8 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
                 backgroundColor: Colors.orange,
               ),
             );
+            setState(() => isProcessing = false);
+            _lottieController.reset();
             return;
           }
           Map<String, dynamic> patientData = {
@@ -158,33 +177,42 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
   Widget _buildTextField(TextEditingController controller, String hint, IconData icon) {
     return TextField(
       controller: controller,
-      style: GoogleFonts.poppins(color: Colors.white),
+      style: GoogleFonts.poppins(color: Colors.white, fontSize: 16),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: GoogleFonts.poppins(color: Colors.white70),
+        hintStyle: GoogleFonts.poppins(color: Colors.white70, fontSize: 14),
         filled: true,
-        fillColor: Colors.indigo.withOpacity(0.3),
+        fillColor: Colors.white.withOpacity(0.1),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
         contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-        prefixIcon: Icon(icon, color: Colors.cyan),
+        prefixIcon: Icon(icon, color: dodgerBlue),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: dodgerBlue, width: 2),
+        ),
       ),
     );
   }
+
   Widget _buildDatePicker() {
     return InkWell(
       onTap: () => _selectDate(context),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
         decoration: BoxDecoration(
-          color: Colors.indigo.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(20),
+          color: Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _birthDate != null ? dodgerBlue : Colors.white.withOpacity(0.3),
+            width: 2,
+          ),
         ),
         child: Row(
           children: [
-            const Icon(Icons.calendar_today, color: Colors.cyan),
+            Icon(Icons.calendar_today, color: dodgerBlue),
             const SizedBox(width: 16),
             Text(
               _birthDate != null
@@ -192,6 +220,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
                   : "Sélectionnez la date",
               style: GoogleFonts.poppins(
                 color: _birthDate != null ? Colors.white : Colors.white70,
+                fontSize: 14,
               ),
             ),
           ],
@@ -219,7 +248,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
 
     return Center(
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(15),
+        borderRadius: BorderRadius.circular(20),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -236,35 +265,39 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
               ),
             ),
             Positioned(
-              bottom: 20,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.indigo.withOpacity(0.6),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 10,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                    child: Text(
-                      _showInstructions ? "Positionnez votre visage" : "Prêt à capturer",
-                      style: GoogleFonts.poppins(
-                        color: Colors.cyan,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+              top: 20,
+              left: 20,
+              right: 20,
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: dodgerBlue.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 8,
+                        spreadRadius: 1,
                       ),
+                    ],
+                  ),
+                  child: Text(
+                    _showInstructions ? "Positionnez votre visage dans le cadre" : "Prêt à capturer",
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
+              ),
+            ),
+            Positioned.fill(
+              child: CustomPaint(
+                painter: FaceOverlayPainter(),
               ),
             ),
           ],
@@ -286,11 +319,11 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
           ),
         ),
         flexibleSpace: Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Colors.indigo, Colors.cyan],
+              colors: [dodgerBlue, const Color(0xFF87CEFA)],
             ),
           ),
         ),
@@ -304,11 +337,11 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
       body: Stack(
         children: [
           Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Colors.indigo, Colors.pinkAccent],
+                colors: [dodgerBlue, const Color(0xFFE6E6FA)],
               ),
             ),
           ),
@@ -316,40 +349,40 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
             child: Column(
               children: [
                 if (widget.isRegisterScreen)
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: [
-                          Text(
-                            "Informations patient",
-                            style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Informations patient",
+                          style: GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
                           ),
-                          const SizedBox(height: 20),
-                          _buildTextField(_firstNameController, "Prénom", Icons.person),
-                          const SizedBox(height: 15),
-                          _buildTextField(_lastNameController, "Nom", Icons.person_outline),
-                          const SizedBox(height: 15),
-                          _buildTextField(_phoneController, "Téléphone", Icons.phone),
-                          const SizedBox(height: 15),
-                          _buildDatePicker(),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: 16),
+                        _buildTextField(_firstNameController, "Prénom", Icons.person),
+                        const SizedBox(height: 12),
+                        _buildTextField(_lastNameController, "Nom", Icons.person_outline),
+                        const SizedBox(height: 12),
+                        _buildTextField(_phoneController, "Téléphone", Icons.phone),
+                        const SizedBox(height: 12),
+                        _buildDatePicker(),
+                      ],
                     ),
                   ),
                 Expanded(
-                  flex: 2,
+                  flex: widget.isRegisterScreen ? 2 : 3,
                   child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 10),
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: dodgerBlue, width: 2),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.3),
+                          color: Colors.black.withOpacity(0.2),
                           blurRadius: 10,
                           spreadRadius: 2,
                         ),
@@ -378,9 +411,9 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
                                 ElevatedButton(
                                   onPressed: _initializeCamera,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.cyan,
+                                    backgroundColor: dodgerBlue,
                                     shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20),
+                                      borderRadius: BorderRadius.circular(12),
                                     ),
                                   ),
                                   child: Text(
@@ -414,11 +447,11 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 20),
+                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
                   child: AnimatedButton(
                     icon: Icons.camera_alt,
                     label: isProcessing ? "Traitement..." : "Capturer",
-                    color: Colors.cyan,
+                    color: dodgerBlue,
                     onPressed: _captureImage,
                   ),
                 ),
@@ -460,10 +493,10 @@ class _AnimatedButtonState extends State<AnimatedButton> with SingleTickerProvid
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..repeat(reverse: true);
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.bounceOut),
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.05).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
     );
-    _glowAnimation = Tween<double>(begin: 2.0, end: 12.0).animate(
+    _glowAnimation = Tween<double>(begin: 2.0, end: 8.0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
     );
   }
@@ -485,24 +518,25 @@ class _AnimatedButtonState extends State<AnimatedButton> with SingleTickerProvid
           return Transform.scale(
             scale: _scaleAnimation.value,
             child: Container(
+              width: double.infinity,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(30),
+                borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: widget.color.withOpacity(0.4),
+                    color: widget.color.withOpacity(0.3),
                     blurRadius: _glowAnimation.value,
                     spreadRadius: 2,
                   ),
                 ],
                 gradient: LinearGradient(
-                  colors: [widget.color.withOpacity(0.8), widget.color.withOpacity(0.6)],
+                  colors: [widget.color, widget.color.withOpacity(0.7)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
               ),
               child: ElevatedButton.icon(
                 onPressed: widget.onPressed,
-                icon: Icon(widget.icon, color: Colors.white, size: 30),
+                icon: Icon(widget.icon, color: Colors.white, size: 28),
                 label: Text(
                   widget.label,
                   style: GoogleFonts.poppins(
@@ -513,8 +547,8 @@ class _AnimatedButtonState extends State<AnimatedButton> with SingleTickerProvid
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.transparent,
-                  minimumSize: const Size(250, 60),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   elevation: 0,
                 ),
               ),
@@ -526,13 +560,36 @@ class _AnimatedButtonState extends State<AnimatedButton> with SingleTickerProvid
   }
 }
 
+class FaceOverlayPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF1E90FF).withOpacity(0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    final double centerX = size.width / 2;
+    final double centerY = size.height / 2;
+    final double radiusX = size.width * 0.3;
+    final double radiusY = size.height * 0.4;
+
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(centerX, centerY), width: radiusX * 2, height: radiusY * 2),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(FaceOverlayPainter oldDelegate) => false;
+}
+
 class ParticlePainter extends CustomPainter {
   final double animationValue;
   ParticlePainter(this.animationValue);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.cyan.withOpacity(0.5);
+    final paint = Paint()..color = const Color(0xFF1E90FF).withOpacity(0.5);
     final random = Random();
     for (int i = 0; i < 20; i++) {
       final offset = Offset(

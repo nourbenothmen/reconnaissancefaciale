@@ -2,14 +2,16 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'face_storage.dart';
 import 'face_detector.dart';
 import 'camera_screen.dart';
 import 'home_page.dart';
+import 'rdv_screen.dart';
+import 'settings_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
+import 'package:iconsax/iconsax.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +23,6 @@ void main() async {
   runApp(const MyApp());
 }
 
-
 class MyApp extends StatelessWidget {
   const MyApp({Key? key}) : super(key: key);
 
@@ -29,7 +30,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       theme: ThemeData(
-        primarySwatch: Colors.indigo,
+        primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
         textTheme: GoogleFonts.poppinsTextTheme(
           Theme.of(context).textTheme.copyWith(
@@ -58,6 +59,12 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
   late Animation<double> _fadeAnimation;
   late Animation<double> _bounceAnimation;
   late Animation<double> _pulseAnimation;
+  int selectedIndex = 0;
+  bool isAuthenticated = false;
+  Map<String, dynamic>? patientData;
+  String patientId = '';
+
+  late List<Widget> pages;
 
   @override
   void initState() {
@@ -76,6 +83,17 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     _animationController.forward();
+
+    pages = [
+      const HomePage(user: "Guest", patientData: null, patientId: ""),
+      Container(color: Colors.grey[200], child: const Center(child: Text("Messages Screen"))),
+      Container(),
+      SettingsScreen(
+        patientData: patientData ?? {},
+        patientId: patientId,
+        onProfileUpdated: _refreshPatientData,
+      ),
+    ];
   }
 
   @override
@@ -87,7 +105,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
   void _register(BuildContext context) async {
     Navigator.push(context, PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => CameraScreen(
-        isRegisterScreen: true, // Mode enregistrement
+        isRegisterScreen: true,
         onPictureTaken: (XFile image, Map<String, dynamic> patientData) async {
           File file = File(image.path);
           List<double> faceData = await detector.extractFaceData(file);
@@ -103,26 +121,24 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
           Navigator.of(context).pop();
         },
       ),
-      // Animation de transition (glissement)
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(1.0, 0.0); // Départ à droite
-        const end = Offset.zero;         // Arrivée au centre
-        const curve = Curves.easeInOut;  // Lissage du mouvement
+        const begin = Offset(1.0, 0.0);
+        const end = Offset.zero;
+        const curve = Curves.easeInOut;
         var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
         return SlideTransition(position: animation.drive(tween), child: child);
       },
     )).then((userName) {
-      // Feedback après enregistrement
       if (userName != null) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(children: [
-                Icon(Icons.check, color: Colors.white),
-                Text("Enregistrement réussi pour $userName!"),
-              ]),
-              backgroundColor: Colors.white30,
-              duration: Duration(seconds: 2),
-            )
+          SnackBar(
+            content: Row(children: [
+              const Icon(Icons.check, color: Colors.white),
+              Text("Enregistrement réussi pour $userName!"),
+            ]),
+            backgroundColor: Colors.white30,
+            duration: const Duration(seconds: 2),
+          ),
         );
       }
     });
@@ -138,21 +154,34 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
             try {
               File file = File(image.path);
               List<double> faceData = await detector.extractFaceData(file);
-              String? patientId = await storage.authenticateFace(faceData);
+              String? newPatientId = await storage.authenticateFace(faceData);
 
-              if (patientId != null) {
+              if (newPatientId != null) {
                 try {
-                  Map<String, dynamic> patientData = await storage.getPatientData(patientId);
-
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => HomePage(
-                        user: '${patientData['firstName']} ${patientData['lastName']}',
-                        patientData: patientData,
-                      ),
-                    ),
-                  );
+                  Map<String, dynamic> newPatientData = await storage.getPatientData(newPatientId);
+                  setState(() {
+                    isAuthenticated = true;
+                    selectedIndex = 0;
+                    patientData = newPatientData;
+                    patientId = newPatientId;
+                    pages[0] = HomePage(
+                      user: '${newPatientData['firstName']} ${newPatientData['lastName']}',
+                      patientData: newPatientData,
+                      patientId: newPatientId,
+                    );
+                    pages[2] = RDVScreen(
+                      user: '${newPatientData['firstName']} ${newPatientData['lastName']}',
+                      patientData: newPatientData,
+                      patientId: newPatientId,
+                      onVisitAdded: _refreshPatientData,
+                    );
+                    pages[3] = SettingsScreen(
+                      patientData: newPatientData,
+                      patientId: newPatientId,
+                      onProfileUpdated: _refreshPatientData,
+                    );
+                  });
+                  Navigator.pop(context);
                 } catch (e) {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -165,7 +194,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
               } else {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
+                  const SnackBar(
                     content: Text("Aucun patient trouvé"),
                     backgroundColor: Colors.red,
                   ),
@@ -185,6 +214,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
       ),
     );
   }
+
   void _deleteUserData(BuildContext context, String userName) async {
     await storage.deleteFaceData(userName);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -202,87 +232,181 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
     );
   }
 
+  void _refreshPatientData() async {
+    if (patientId.isNotEmpty) {
+      try {
+        Map<String, dynamic> updatedPatientData = await storage.getPatientData(patientId);
+        setState(() {
+          patientData = updatedPatientData;
+          pages[0] = HomePage(
+            user: '${updatedPatientData['firstName']} ${updatedPatientData['lastName']}',
+            patientData: updatedPatientData,
+            patientId: patientId,
+          );
+          pages[2] = RDVScreen(
+            user: '${updatedPatientData['firstName']} ${updatedPatientData['lastName']}',
+            patientData: updatedPatientData,
+            patientId: patientId,
+            onVisitAdded: _refreshPatientData,
+          );
+          pages[3] = SettingsScreen(
+            patientData: updatedPatientData,
+            patientId: patientId,
+            onProfileUpdated: _refreshPatientData,
+          );
+        });
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Erreur lors de la mise à jour des données: ${e.toString()}"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _logout() {
+    setState(() {
+      isAuthenticated = false;
+      selectedIndex = 0;
+      patientData = null;
+      patientId = '';
+      pages[0] = const HomePage(user: "Guest", patientData: null, patientId: "");
+      pages[1] = Container(color: Colors.grey[200], child: const Center(child: Text("Messages Screen")));
+      pages[2] = Container(color: Colors.grey[200], child: const Center(child: Text("RDV Screen")));
+      pages[3] = SettingsScreen(
+        patientData: {},
+        patientId: '',
+        onProfileUpdated: _refreshPatientData,
+      );
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Déconnexion réussie"),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Authentification Faciale", style: Theme.of(context).textTheme.headlineMedium),
+        title: Text("Portail Médical", style: Theme.of(context).textTheme.headlineMedium),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Colors.indigo, Colors.cyan],
+              colors: [Color(0xFF1E90FF), Color(0xFF87CEFA)],
             ),
           ),
         ),
         centerTitle: true,
         elevation: 10,
+        actions: [
+          if (isAuthenticated)
+            IconButton(
+              icon: const Icon(Icons.logout, color: Colors.white),
+              tooltip: 'Déconnexion',
+              onPressed: _logout,
+            ),
+        ],
       ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Colors.indigo, Colors.pinkAccent],
+            colors: [Color(0xFF1E90FF), Color(0xFFE6E6FA)],
           ),
         ),
-        child: Center(
+        child: isAuthenticated
+            ? pages[selectedIndex]
+            : Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              FadeTransition(
-                opacity: _fadeAnimation,
-                child: ScaleTransition(
-                  scale: _pulseAnimation,
-                  child: Lottie.asset('assets/scanning.json', width: 150, height: 150, repeat: true),
-                ),
+              Image.asset(
+                'images/img.png',
+                width: 300,
+                height: 300,
+                fit: BoxFit.contain,
               ),
               const SizedBox(height: 20),
               ScaleTransition(
                 scale: _bounceAnimation,
                 child: ShaderMask(
                   shaderCallback: (bounds) => const LinearGradient(
-                    colors: [Colors.cyan, Colors.pink],
+                    colors: [Color(0xFF1E90FF), Color(0xFF87CEFA)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ).createShader(bounds),
                   child: Text(
-                    "Bienvenue !",
+                    "Bienvenue au Portail Médical",
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
                 ),
               ),
               const SizedBox(height: 10),
               Text(
-                "Authentifiez-vous avec votre visage",
+                "Accédez à vos dossiers via reconnaissance faciale",
                 style: Theme.of(context).textTheme.bodyMedium,
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: 40),
               AnimatedButton(
-                icon: Icons.app_registration,
-                label: "Nouveau patient",
-                color: Colors.cyan,
+                icon: Icons.person_add,
+                label: "Nouveau Patient",
+                color: const Color(0xFF1E90FF),
                 onPressed: () => _register(context),
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 20),
               AnimatedButton(
                 icon: Icons.login,
-                label: "S'authentifier",
-                color: Colors.pinkAccent,
+                label: "Connexion Patient",
+                color: const Color(0xFF1E90FF),
                 onPressed: () => _authenticate(context),
               ),
-              const SizedBox(height: 20),
-              // AnimatedButton(
-              //   icon: Icons.delete,
-              //   label: "Supprimer les données",
-              //   color: Colors.redAccent,
-              //   onPressed: () => _deleteUserData(context, 'nour'),
-              // ),
             ],
           ),
         ),
       ),
+      bottomNavigationBar: isAuthenticated
+          ? BottomNavigationBar(
+        elevation: 0,
+        backgroundColor: Colors.white,
+        unselectedItemColor: Colors.black26,
+        selectedItemColor: const Color(0xFF1E90FF),
+        type: BottomNavigationBarType.fixed,
+        currentIndex: selectedIndex,
+        onTap: (value) {
+          setState(() {
+            selectedIndex = value;
+          });
+        },
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Iconsax.folder),
+            label: "Dossier",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Iconsax.message),
+            label: "Messages",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Iconsax.calendar),
+            label: "RDV",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Iconsax.setting),
+            label: "Paramètres",
+          ),
+        ],
+      )
+          : null,
     );
   }
 }

@@ -1,22 +1,23 @@
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:lottie/lottie.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
 import 'main.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'face_storage.dart';
 
 class HomePage extends StatefulWidget {
   final String user;
   final Map<String, dynamic>? patientData;
+  final String patientId;
 
   const HomePage({
     Key? key,
     required this.user,
     this.patientData,
+    required this.patientId,
   }) : super(key: key);
 
   @override
@@ -24,56 +25,38 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late AnimationController _starController;
-  bool _showDetails = false;
+  late final DateFormat _dateFormat = DateFormat('dd/MM/yyyy');
+  late final DateFormat _timeFormat = DateFormat('HH:mm');
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 1),
-    );
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
-    );
-    _animationController.forward();
-
-    _starController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
+    print('HomePage patientData: ${widget.patientData}');
   }
 
   @override
   void dispose() {
-    _animationController.dispose();
-    _starController.dispose();
     super.dispose();
   }
 
   void _printPatientRecord() async {
     if (widget.patientData == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Aucun patient sélectionné pour l'impression."),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Aucun patient sélectionné pour l'impression."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
     }
 
-    // Format birth date
     final birthDate = widget.patientData!['birthDate'] != null
-        ? DateFormat('dd/MM/yyyy').format(DateTime.parse(widget.patientData!['birthDate']))
+        ? _dateFormat.format(DateTime.parse(widget.patientData!['birthDate']))
         : 'Non renseignée';
-    final lastVisit = widget.patientData!['lastVisit'] != null
-        ? DateFormat('dd/MM/yyyy').format(DateTime.parse(widget.patientData!['lastVisit']))
-        : 'Première visite';
+    final listeVisites = widget.patientData!['listeVisites'] ?? [];
 
-    // Create a PDF document
     final pdf = pw.Document();
 
     pdf.addPage(
@@ -87,13 +70,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 style: pw.TextStyle(
                   fontSize: 24,
                   fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.indigo,
+                  color: PdfColors.blue,
                 ),
               ),
               pw.SizedBox(height: 20),
               pw.Row(
                 children: [
-                  pw.Icon(pw.IconData(0xe853), color: PdfColors.cyan), // Person icon
+                  pw.Icon(pw.IconData(0xe853), color: PdfColors.blue),
                   pw.SizedBox(width: 10),
                   pw.Text(
                     '${widget.patientData!['firstName']} ${widget.patientData!['lastName']}',
@@ -108,12 +91,34 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               pw.SizedBox(height: 10),
               pw.Divider(color: PdfColors.grey),
               pw.SizedBox(height: 10),
-              _buildPdfDetailItem('Date de naissance', birthDate, pw.IconData(0xe551)), // Cake icon
-              _buildPdfDetailItem('Téléphone', widget.patientData!['phone'] ?? 'Non renseigné', pw.IconData(0xe0cd)), // Phone icon
-              _buildPdfDetailItem('Dernière visite', lastVisit, pw.IconData(0xe916)), // Calendar icon
+              _buildPdfDetailItem('Date de naissance', birthDate, pw.IconData(0xe551)),
+              _buildPdfDetailItem('Téléphone', widget.patientData!['phone'] ?? 'Non renseigné', pw.IconData(0xe0cd)),
+              if (listeVisites.isNotEmpty)
+                ...listeVisites.map((visit) {
+                  final String visitDateStr = visit['date'] as String;
+                  final String visitTimeStr = visit['time'] as String;
+                  try {
+                    final DateTime visitDateTime = _dateFormat.parse(visitDateStr);
+                    final List<String> timeParts = visitTimeStr.split(':');
+                    final DateTime fullDateTime = DateTime(
+                      visitDateTime.year,
+                      visitDateTime.month,
+                      visitDateTime.day,
+                      int.parse(timeParts[0]),
+                      int.parse(timeParts[1]),
+                    );
+                    return _buildPdfDetailItem(
+                      'Visite',
+                      '${_dateFormat.format(fullDateTime)} à ${_timeFormat.format(fullDateTime)}',
+                      pw.IconData(0xe916),
+                    );
+                  } catch (e) {
+                    return _buildPdfDetailItem('Visite', 'Date invalide', pw.IconData(0xe916));
+                  }
+                }),
               pw.SizedBox(height: 20),
               pw.Text(
-                'Généré le : ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}',
+                'Généré le : ${_dateFormat.format(DateTime.now())} ${_timeFormat.format(DateTime.now())}',
                 style: pw.TextStyle(
                   fontSize: 12,
                   color: PdfColors.grey,
@@ -125,24 +130,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
     );
 
-    // Print the PDF
     await Printing.layoutPdf(
       onLayout: (format) => pdf.save(),
     );
 
-    // Show confirmation
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Impression de la fiche patient terminée."),
-        backgroundColor: Colors.green,
-      ),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Impression de la fiche patient terminée."),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
   pw.Widget _buildPdfDetailItem(String label, String value, pw.IconData icon) {
     return pw.Row(
       children: [
-        pw.Icon(icon, color: PdfColors.cyan, size: 20),
+        pw.Icon(icon, color: PdfColors.blue, size: 20),
         pw.SizedBox(width: 10),
         pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -168,76 +173,132 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  void _scheduleAppointment() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Prendre un RDV"),
-        content: Text("Voulez-vous prendre un rendez-vous pour ce patient ?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("Annuler"),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text("Rendez-vous programmé"),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            },
-            child: Text("Confirmer"),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildPatientCard() {
     if (widget.patientData == null) {
-      return Container();
+      return const Center(
+        child: Text(
+          "Aucune donnée patient disponible",
+          style: TextStyle(color: Colors.white70, fontSize: 16),
+        ),
+      );
     }
 
     final birthDate = widget.patientData!['birthDate'] != null
-        ? DateFormat('dd/MM/yyyy').format(
-        DateTime.parse(widget.patientData!['birthDate']))
+        ? _dateFormat.format(DateTime.parse(widget.patientData!['birthDate']))
         : 'Non renseignée';
+    final listeVisites = widget.patientData!['listeVisites'] ?? [];
 
     return Card(
-      margin: const EdgeInsets.all(16),
-      elevation: 10,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 8,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
       ),
-      color: Colors.indigo.withOpacity(0.7),
+      color: const Color(0xFF1E90FF).withOpacity(0.9),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ListTile(
-              leading: const Icon(Icons.person, color: Colors.cyan),
-              title: Text(
-                '${widget.patientData!['firstName']} ${widget.patientData!['lastName']}',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+            Row(
+              children: [
+                const Icon(Icons.person, color: Colors.white, size: 30),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '${widget.patientData!['firstName']} ${widget.patientData!['lastName']}',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
-              ),
-              subtitle: Text(
-                'Dossier patient',
-                style: GoogleFonts.poppins(color: Colors.white70),
-              ),
+              ],
             ),
+            const SizedBox(height: 16),
             const Divider(color: Colors.white54),
+            const SizedBox(height: 16),
             _buildDetailItem('Date de naissance', birthDate, Icons.cake),
-            _buildDetailItem('Téléphone', widget.patientData!['phone'], Icons.phone),
-            _buildDetailItem('Dernière visite',
-                widget.patientData!['lastVisit'] ?? 'Première visite',
-                Icons.calendar_today),
+            _buildDetailItem('Téléphone', widget.patientData!['phone'] ?? 'Non renseigné', Icons.phone),
+            if (listeVisites.isNotEmpty)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10.0),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, color: Colors.white, size: 24),
+                        const SizedBox(width: 16),
+                        Text(
+                          'Liste des visites',
+                          style: GoogleFonts.poppins(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ...listeVisites.map((visit) {
+                    print('Visit in UI: $visit');
+                    final String visitDateStr = visit['date'] as String;
+                    final String visitTimeStr = visit['time'] as String;
+                    try {
+                      final DateTime visitDateTime = _dateFormat.parse(visitDateStr);
+                      final List<String> timeParts = visitTimeStr.split(':');
+                      final DateTime fullDateTime = DateTime(
+                        visitDateTime.year,
+                        visitDateTime.month,
+                        visitDateTime.day,
+                        int.parse(timeParts[0]),
+                        int.parse(timeParts[1]),
+                      );
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 40),
+                            Expanded(
+                              child: Text(
+                                '${_dateFormat.format(fullDateTime)} à ${_timeFormat.format(fullDateTime)}',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    } catch (e) {
+                      print('Error parsing visit: $e');
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 40),
+                            Expanded(
+                              child: Text(
+                                'Date invalide',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                  }).toList(),
+                ],
+              )
+            else
+              _buildDetailItem('Liste des visites', 'Aucune visite enregistrée', Icons.calendar_today),
           ],
         ),
       ),
@@ -246,30 +307,33 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Widget _buildDetailItem(String label, String value, IconData icon) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 10.0),
       child: Row(
         children: [
-          Icon(icon, color: Colors.cyan, size: 24),
+          Icon(icon, color: Colors.white, size: 24),
           const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: GoogleFonts.poppins(
-                  color: Colors.white70,
-                  fontSize: 14,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white70,
+                    fontSize: 14,
+                  ),
                 ),
-              ),
-              Text(
-                value,
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -293,30 +357,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Colors.indigo, Colors.cyan],
+              colors: [Color(0xFF1E90FF), Color(0xFF87CEFA)],
             ),
           ),
         ),
-        elevation: 10,
+        elevation: 8,
         centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.print, color: Colors.white),
             tooltip: 'Imprimer fiche patient',
             onPressed: _printPatientRecord,
-          ),
-          IconButton(
-            icon: const Icon(Icons.calendar_today, color: Colors.white),
-            tooltip: 'Prendre RDV',
-            onPressed: _scheduleAppointment,
-          ),
-          IconButton(
-            icon: const Icon(Icons.info_outline, color: Colors.white),
-            onPressed: () {
-              setState(() {
-                _showDetails = !_showDetails;
-              });
-            },
           ),
         ],
       ),
@@ -325,82 +376,31 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Colors.indigo, Colors.pinkAccent],
+            colors: [Color(0xFF1E90FF), Color(0xFFE6E6FA)],
           ),
         ),
         child: SingleChildScrollView(
           child: Column(
             children: [
-              FadeTransition(
-                opacity: _fadeAnimation,
-                child: Column(
-                  children: [
-                    Lottie.asset(
-                      'assets/scanning.json',
-                      width: 150,
-                      height: 150,
-                      repeat: false,
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.medical_services, color: Colors.white, size: 40),
+                  const SizedBox(width: 12),
+                  Text(
+                    "Bienvenue,${widget.user}",
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
                     ),
-                    Text(
-                      "Bienvenue, ${widget.user}",
-                      style: GoogleFonts.poppins(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    if (_showDetails) _buildPatientCard(),
-                    if (!_showDetails)
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            setState(() {
-                              _showDetails = true;
-                            });
-                          },
-                          icon: const Icon(Icons.visibility, color: Colors.white),
-                          label: Text(
-                            "Afficher les détails",
-                            style: GoogleFonts.poppins(color: Colors.white),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.cyan.withOpacity(0.6),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 24, vertical: 12),
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 30),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pushAndRemoveUntil(
-                          context,
-                          MaterialPageRoute(builder: (_) => const MyApp()),
-                              (Route<dynamic> route) => false,
-                        );
-                      },
-                      icon: const Icon(Icons.logout, color: Colors.white),
-                      label: Text(
-                        "Déconnexion",
-                        style: GoogleFonts.poppins(color: Colors.white),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.pinkAccent.withOpacity(0.7),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 12),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
+              const SizedBox(height: 30),
+              _buildPatientCard(),
+              const SizedBox(height: 80),
             ],
           ),
         ),
