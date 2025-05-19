@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:reconnfaciale/task_management_screen.dart';
 import 'main.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'face_storage.dart';
@@ -12,12 +13,14 @@ class HomePage extends StatefulWidget {
   final String user;
   final Map<String, dynamic>? patientData;
   final String patientId;
+  final TaskManagementScreen? taskManagementScreen;
 
   const HomePage({
     Key? key,
     required this.user,
     this.patientData,
     required this.patientId,
+    this.taskManagementScreen,
   }) : super(key: key);
 
   @override
@@ -55,7 +58,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final birthDate = widget.patientData!['birthDate'] != null
         ? _dateFormat.format(DateTime.parse(widget.patientData!['birthDate']))
         : 'Non renseignée';
-    final listeVisites = widget.patientData!['listeVisites'] ?? [];
+    var listeVisites = widget.patientData!['listeVisites'] ?? [];
+    if (listeVisites is Map<String, dynamic>) {
+      listeVisites = listeVisites.values.toList();
+    } else if (listeVisites is! List) {
+      listeVisites = [];
+    }
 
     final pdf = pw.Document();
 
@@ -95,8 +103,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               _buildPdfDetailItem('Téléphone', widget.patientData!['phone'] ?? 'Non renseigné', pw.IconData(0xe0cd)),
               if (listeVisites.isNotEmpty)
                 ...listeVisites.map((visit) {
-                  final String visitDateStr = visit['date'] as String;
-                  final String visitTimeStr = visit['time'] as String;
+                  final String visitDateStr = visit['date'] as String? ?? '';
+                  final String visitTimeStr = visit['time'] as String? ?? '';
+                  if (visitDateStr.isEmpty || visitTimeStr.isEmpty) {
+                    return _buildPdfDetailItem('Visite', 'Données manquantes', pw.IconData(0xe916));
+                  }
                   try {
                     final DateTime visitDateTime = _dateFormat.parse(visitDateStr);
                     final List<String> timeParts = visitTimeStr.split(':');
@@ -186,7 +197,44 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final birthDate = widget.patientData!['birthDate'] != null
         ? _dateFormat.format(DateTime.parse(widget.patientData!['birthDate']))
         : 'Non renseignée';
-    final listeVisites = widget.patientData!['listeVisites'] ?? [];
+    var listeVisites = widget.patientData!['listeVisites'] ?? [];
+    print('Before conversion - listeVisites type: ${listeVisites.runtimeType}');
+    if (listeVisites is Map<String, dynamic>) {
+      listeVisites = listeVisites.values.toList();
+    } else if (listeVisites is! List) {
+      listeVisites = [];
+    }
+    print('After conversion - listeVisites type: ${listeVisites.runtimeType}, content: $listeVisites');
+
+    // Trier les visites par date et heure dans l'ordre croissant, seulement si ce n'est pas vide
+    if (listeVisites is List && listeVisites.isNotEmpty) {
+      print('Sorting listeVisites: $listeVisites');
+      listeVisites.sort((a, b) {
+        final dateA = _dateFormat.parse(a['date'] as String? ?? '01/01/2000');
+        final timeA = a['time'] as String? ?? '00:00';
+        final timePartsA = timeA.split(':');
+        final fullDateTimeA = DateTime(
+          dateA.year,
+          dateA.month,
+          dateA.day,
+          timePartsA.isNotEmpty ? int.tryParse(timePartsA[0]) ?? 0 : 0,
+          timePartsA.length > 1 ? int.tryParse(timePartsA[1]) ?? 0 : 0,
+        );
+
+        final dateB = _dateFormat.parse(b['date'] as String? ?? '01/01/2000');
+        final timeB = b['time'] as String? ?? '00:00';
+        final timePartsB = timeB.split(':');
+        final fullDateTimeB = DateTime(
+          dateB.year,
+          dateB.month,
+          dateB.day,
+          timePartsB.isNotEmpty ? int.tryParse(timePartsB[0]) ?? 0 : 0,
+          timePartsB.length > 1 ? int.tryParse(timePartsB[1]) ?? 0 : 0,
+        );
+
+        return fullDateTimeA.compareTo(fullDateTimeB);
+      });
+    }
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -223,79 +271,131 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             _buildDetailItem('Téléphone', widget.patientData!['phone'] ?? 'Non renseigné', Icons.phone),
             if (listeVisites.isNotEmpty)
               Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10.0),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.calendar_today, color: Colors.white, size: 24),
-                        const SizedBox(width: 16),
-                        Text(
-                          'Liste des visites',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white70,
-                            fontSize: 14,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10.0),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, color: Colors.white, size: 24),
+                          const SizedBox(width: 16),
+                          Text(
+                            'Liste des visites',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white70,
+                              fontSize: 14,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  ...listeVisites.map((visit) {
-                    print('Visit in UI: $visit');
-                    final String visitDateStr = visit['date'] as String;
-                    final String visitTimeStr = visit['time'] as String;
-                    try {
-                      final DateTime visitDateTime = _dateFormat.parse(visitDateStr);
-                      final List<String> timeParts = visitTimeStr.split(':');
-                      final DateTime fullDateTime = DateTime(
-                        visitDateTime.year,
-                        visitDateTime.month,
-                        visitDateTime.day,
-                        int.parse(timeParts[0]),
-                        int.parse(timeParts[1]),
-                      );
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
-                        child: Row(
-                          children: [
-                            const SizedBox(width: 40),
-                            Expanded(
-                              child: Text(
-                                '${_dateFormat.format(fullDateTime)} à ${_timeFormat.format(fullDateTime)}',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columnSpacing: 16.0,
+                        columns: const [
+                          DataColumn(
+                            label: Text(
+                              'Date',
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                             ),
-                          ],
-                        ),
-                      );
-                    } catch (e) {
-                      print('Error parsing visit: $e');
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
-                        child: Row(
-                          children: [
-                            const SizedBox(width: 40),
-                            Expanded(
-                              child: Text(
-                                'Date invalide',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                          ),
+                          DataColumn(
+                            label: Text(
+                              'Heure',
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                             ),
-                          ],
-                        ),
-                      );
-                    }
-                  }).toList(),
-                ],
+                          ),
+                        ],
+                        rows: listeVisites.map<DataRow>((visit) {
+                          print('Visit in UI: $visit');
+                          final String visitDateStr = visit['date'] as String? ?? '';
+                          final String visitTimeStr = visit['time'] as String? ?? '';
+                          if (visitDateStr.isEmpty || visitTimeStr.isEmpty) {
+                            return DataRow(
+                              cells: [
+                                DataCell(
+                                  Text(
+                                    'Données manquantes',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  Text(
+                                    '',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+                          try {
+                            final DateTime visitDateTime = _dateFormat.parse(visitDateStr);
+                            final List<String> timeParts = visitTimeStr.split(':');
+                            final DateTime fullDateTime = DateTime(
+                              visitDateTime.year,
+                              visitDateTime.month,
+                              visitDateTime.day,
+                              int.parse(timeParts[0]),
+                              int.parse(timeParts[1]),
+                            );
+                            return DataRow(
+                              cells: [
+                                DataCell(
+                                  Text(
+                                    _dateFormat.format(fullDateTime),
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  Text(
+                                    _timeFormat.format(fullDateTime),
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          } catch (e) {
+                            print('Error parsing visit: $e');
+                            return DataRow(
+                              cells: [
+                                DataCell(
+                                  Text(
+                                    'Date invalide',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  Text(
+                                    '',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+                        }).toList() as List<DataRow>,
+                      ),
+                    ),
+                  ]
               )
             else
               _buildDetailItem('Liste des visites', 'Aucune visite enregistrée', Icons.calendar_today),
@@ -304,7 +404,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
     );
   }
-
   Widget _buildDetailItem(String label, String value, IconData icon) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10.0),
@@ -389,7 +488,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   const Icon(Icons.medical_services, color: Colors.white, size: 40),
                   const SizedBox(width: 12),
                   Text(
-                    "Bienvenue,${widget.user}",
+                    "Bienvenue, ${widget.user}",
                     style: GoogleFonts.poppins(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,

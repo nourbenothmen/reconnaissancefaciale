@@ -26,6 +26,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
   final TextEditingController _firstNameController = TextEditingController();
   final TextEditingController _lastNameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController(); // Nouveau controller pour l'email
   DateTime? _birthDate;
   bool isProcessing = false;
   bool _showInstructions = true;
@@ -112,6 +113,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
     _firstNameController.dispose();
     _lastNameController.dispose();
     _phoneController.dispose();
+    _emailController.dispose(); // Dispose du nouveau controller
     _lottieController.dispose();
     _fadeController.dispose();
     _particleController.dispose();
@@ -131,6 +133,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
           if (_firstNameController.text.isEmpty ||
               _lastNameController.text.isEmpty ||
               _phoneController.text.isEmpty ||
+              _emailController.text.isEmpty || // Ajout de la validation pour l'email
               _birthDate == null) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -146,6 +149,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
             'firstName': _firstNameController.text.trim(),
             'lastName': _lastNameController.text.trim(),
             'phone': _phoneController.text.trim(),
+            'email': _emailController.text.trim(), // Ajout de l'email dans les données
             'birthDate': _birthDate?.toIso8601String() ?? '',
           };
 
@@ -368,6 +372,8 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
                         _buildTextField(_lastNameController, "Nom", Icons.person_outline),
                         const SizedBox(height: 12),
                         _buildTextField(_phoneController, "Téléphone", Icons.phone),
+                        const SizedBox(height: 12),
+                        _buildTextField(_emailController, "Email", Icons.email), // Nouveau champ email
                         const SizedBox(height: 12),
                         _buildDatePicker(),
                       ],

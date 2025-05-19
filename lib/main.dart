@@ -3,21 +3,78 @@ import 'package:camera/camera.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:reconnfaciale/task_management_screen.dart';
 import 'face_storage.dart';
 import 'face_detector.dart';
 import 'camera_screen.dart';
 import 'home_page.dart';
 import 'rdv_screen.dart';
 import 'settings_screen.dart';
+import 'notifications_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:iconsax/iconsax.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
+import 'package:permission_handler/permission_handler.dart';
+
+// Fonction de niveau supérieur pour gérer les notifications en arrière-plan
+@pragma('vm:entry-point')
+void notificationBackgroundHandler(NotificationResponse notificationResponse) async {
+  print('Background notification received: ${notificationResponse.payload}');
+  // Ajoutez ici toute logique spécifique pour le traitement en arrière-plan si nécessaire
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+  const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const DarwinInitializationSettings initializationSettingsDarwin = DarwinInitializationSettings();
+  final InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+    iOS: initializationSettingsDarwin,
   );
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    onDidReceiveNotificationResponse: (NotificationResponse response) {
+      print('Notification tapped in main: ${response.payload}');
+    },
+    onDidReceiveBackgroundNotificationResponse: notificationBackgroundHandler, // Référence au gestionnaire
+  );
+
+  // Créer le canal de notification
+  const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'task_channel_id',
+    'Task Reminders',
+    description: 'Notifications for task reminders',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+  );
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
+
+  if (await Permission.scheduleExactAlarm.isDenied) {
+    await Permission.scheduleExactAlarm.request();
+  }
+  bool? isGranted = await Permission.scheduleExactAlarm.isGranted;
+  print('SCHEDULE_EXACT_ALARM permission granted: $isGranted');
+
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.requestNotificationsPermission();
+  bool? notificationsGranted = await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.areNotificationsEnabled();
+  print('POST_NOTIFICATIONS permission granted: $notificationsGranted');
+
+  tzdata.initializeTimeZones();
+  tz.setLocalLocation(tz.getLocation('Africa/Tunis'));
+  print('Current timezone in main: ${tz.local.name}');
 
   print("✅ Firebase initialisé !");
   runApp(const MyApp());
@@ -63,6 +120,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
   bool isAuthenticated = false;
   Map<String, dynamic>? patientData;
   String patientId = '';
+  List<Map<String, dynamic>> matchedTasks = [];
 
   late List<Widget> pages;
 
@@ -86,12 +144,13 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
 
     pages = [
       const HomePage(user: "Guest", patientData: null, patientId: ""),
-      Container(color: Colors.grey[200], child: const Center(child: Text("Messages Screen"))),
+      NotificationsScreen(matchedTasks: matchedTasks),
       Container(),
       SettingsScreen(
         patientData: patientData ?? {},
         patientId: patientId,
         onProfileUpdated: _refreshPatientData,
+        onTasksMatched: _updateMatchedTasks,
       ),
     ];
   }
@@ -115,10 +174,12 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
             patientData['lastName'],
             patientData['phone'],
             patientData['birthDate'],
+            patientData['email'], // Ajout de l'email passé depuis CameraScreen
             faceData,
           );
 
-          Navigator.of(context).pop();
+          String userName = '${patientData['firstName']} ${patientData['lastName']}';
+          Navigator.of(context).pop(userName);
         },
       ),
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -169,6 +230,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
                       patientData: newPatientData,
                       patientId: newPatientId,
                     );
+                    pages[1] = NotificationsScreen(matchedTasks: matchedTasks);
                     pages[2] = RDVScreen(
                       user: '${newPatientData['firstName']} ${newPatientData['lastName']}',
                       patientData: newPatientData,
@@ -179,6 +241,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
                       patientData: newPatientData,
                       patientId: newPatientId,
                       onProfileUpdated: _refreshPatientData,
+                      onTasksMatched: _updateMatchedTasks,
                     );
                   });
                   Navigator.pop(context);
@@ -243,6 +306,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
             patientData: updatedPatientData,
             patientId: patientId,
           );
+          pages[1] = NotificationsScreen(matchedTasks: matchedTasks);
           pages[2] = RDVScreen(
             user: '${updatedPatientData['firstName']} ${updatedPatientData['lastName']}',
             patientData: updatedPatientData,
@@ -253,6 +317,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
             patientData: updatedPatientData,
             patientId: patientId,
             onProfileUpdated: _refreshPatientData,
+            onTasksMatched: _updateMatchedTasks,
           );
         });
       } catch (e) {
@@ -272,13 +337,15 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
       selectedIndex = 0;
       patientData = null;
       patientId = '';
+      matchedTasks = [];
       pages[0] = const HomePage(user: "Guest", patientData: null, patientId: "");
-      pages[1] = Container(color: Colors.grey[200], child: const Center(child: Text("Messages Screen")));
+      pages[1] = NotificationsScreen(matchedTasks: matchedTasks);
       pages[2] = Container(color: Colors.grey[200], child: const Center(child: Text("RDV Screen")));
       pages[3] = SettingsScreen(
         patientData: {},
         patientId: '',
         onProfileUpdated: _refreshPatientData,
+        onTasksMatched: _updateMatchedTasks,
       );
     });
     ScaffoldMessenger.of(context).showSnackBar(
@@ -288,6 +355,13 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
         duration: Duration(seconds: 2),
       ),
     );
+  }
+
+  void _updateMatchedTasks(List<Map<String, dynamic>> newMatchedTasks) {
+    setState(() {
+      matchedTasks = newMatchedTasks;
+      pages[1] = NotificationsScreen(matchedTasks: matchedTasks);
+    });
   }
 
   @override
@@ -324,7 +398,18 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
           ),
         ),
         child: isAuthenticated
-            ? pages[selectedIndex]
+            ? (selectedIndex == 0
+            ? HomePage(
+          user: '${patientData!['firstName']} ${patientData!['lastName']}',
+          patientData: patientData,
+          patientId: patientId,
+          taskManagementScreen: TaskManagementScreen(
+            patientData: patientData!,
+            patientId: patientId,
+            onTasksMatched: _updateMatchedTasks,
+          ),
+        )
+            : pages[selectedIndex])
             : Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -394,7 +479,7 @@ class _MainPageState extends State<MainPage> with TickerProviderStateMixin {
           ),
           BottomNavigationBarItem(
             icon: Icon(Iconsax.message),
-            label: "Messages",
+            label: "notifications",
           ),
           BottomNavigationBarItem(
             icon: Icon(Iconsax.calendar),

@@ -13,6 +13,7 @@ class FaceStorageFirebase {
       String lastName,
       String phone,
       String birthDate,
+      String email, // Nouveau paramètre pour l'email
       List<double> faceData,
       ) async {
     try {
@@ -21,6 +22,7 @@ class FaceStorageFirebase {
         'lastName': lastName,
         'phone': phone,
         'birthDate': birthDate,
+        'email': email, // Ajout du champ email
         'faceData': faceData,
         'createdAt': FieldValue.serverTimestamp(),
         'listeVisites': [],
@@ -40,15 +42,26 @@ class FaceStorageFirebase {
     }
   }
 
-  Future<void> addVisit(String patientId, DateTime visitDateTime) async {
-    final patientRef = _firestore.collection('patients').doc(patientId);
-    final visitMap = {
-      'date': _dateFormat.format(visitDateTime),
-      'time': _timeFormat.format(visitDateTime),
-    };
-    await patientRef.update({
-      'listeVisites': FieldValue.arrayUnion([visitMap]),
-    });
+  Future<void> addVisit(String patientId, DateTime dateTime, {bool reminderSent = false}) async {
+    final date = _dateFormat.format(dateTime);
+    final time = _timeFormat.format(dateTime);
+    final visitData = {'date': date, 'time': time, 'reminderSent': reminderSent};
+
+    final patientDoc = await _firestore.collection('patients').doc(patientId).get();
+    if (patientDoc.exists) {
+      final currentData = patientDoc.data() ?? {};
+      var currentVisits = currentData['listeVisites'] ?? [];
+      if (currentVisits is Map<String, dynamic>) {
+        currentVisits = currentVisits.values.toList();
+      } else if (currentVisits is! List) {
+        currentVisits = [];
+      }
+      if (!currentVisits.any((v) => (v as Map<String, dynamic>)['date'] == date && (v as Map<String, dynamic>)['time'] == time)) {
+        await _firestore.collection('patients').doc(patientId).update({
+          'listeVisites': FieldValue.arrayUnion([visitData]),
+        });
+      }
+    }
   }
 
   Future<void> updatePatientProfile(

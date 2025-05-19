@@ -17,6 +17,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
+        coreLibraryDesugaringEnabled true // Enable desugaring
     }
 
     dependencies {
@@ -25,6 +26,8 @@ android {
         implementation 'com.google.firebase:firebase-firestore'
         implementation 'com.google.mlkit:face-detection:16.1.5'
         implementation 'androidx.multidex:multidex:2.0.1' // Nécessaire pour Firebase
+        implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.0"
+        coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4' // Add desugaring dependency
     }
 
     kotlinOptions {

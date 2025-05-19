@@ -2,17 +2,23 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest.dart' as tzdata;
+
 import 'face_storage.dart';
-import 'all_tasks_screen.dart'; // Import the new scrseen
+import 'all_tasks_screen.dart';
 
 class TaskManagementScreen extends StatefulWidget {
   final Map<String, dynamic> patientData;
   final String patientId;
+  final Function(List<Map<String, dynamic>>) onTasksMatched;
 
   const TaskManagementScreen({
     Key? key,
     required this.patientData,
     required this.patientId,
+    required this.onTasksMatched,
   }) : super(key: key);
 
   @override
@@ -24,21 +30,151 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
   DateTime? _taskDateTime;
   final FaceStorageFirebase _storage = FaceStorageFirebase();
   List<Map<String, dynamic>> tasks = [];
+  List<Map<String, dynamic>> matchedTasks = [];
+  late FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin;
+  bool _isPeriodicCheckRunning = false;
 
   @override
   void initState() {
     super.initState();
+    _initializeNotifications();
     _loadTasks();
+    _startPeriodicCheck();
+  }
+
+  void _initializeNotifications() {
+    flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+    const AndroidInitializationSettings initializationSettingsAndroid =
+    AndroidInitializationSettings('@mipmap/ic_launcher');
+    const InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+    );
+    flutterLocalNotificationsPlugin.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        print('Notification tapped: ${response.payload}');
+      },
+    );
+    tzdata.initializeTimeZones();
+    tz.setLocalLocation(tz.getLocation('Africa/Tunis')); // Set to Tunisia timezone
+    print('Current timezone: ${tz.local.name}'); // Log timezone for verification
   }
 
   Future<void> _loadTasks() async {
-    final fetchedTasks = await _storage.getTasks(widget.patientId);
-    setState(() {
-      tasks = fetchedTasks;
-    });
-    _scheduleNotifications();
+    try {
+      final fetchedTasks = await _storage.getTasks(widget.patientId);
+      if (mounted) {
+        setState(() {
+          tasks = fetchedTasks;
+        });
+        _checkForMatchingTasks();
+        _scheduleNotifications();
+      }
+    } catch (e) {
+      print('Error loading tasks: $e');
+    }
   }
 
+  void _startPeriodicCheck() {
+    if (_isPeriodicCheckRunning) return;
+    _isPeriodicCheckRunning = true;
+    Future.doWhile(() async {
+      if (!mounted) {
+        _isPeriodicCheckRunning = false;
+        return false;
+      }
+      await Future.delayed(const Duration(seconds: 10));
+      _checkForMatchingTasks();
+      return true;
+    });
+  }
+
+  void _checkForMatchingTasks() {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final dateFormat = DateFormat('dd/MM/yyyy');
+    final timeFormat = DateFormat('HH:mm');
+    final currentDate = dateFormat.format(now);
+
+    print('Checking tasks at ${dateFormat.format(now)} ${timeFormat.format(now)}');
+
+    List<Map<String, dynamic>> newMatchedTasks = [];
+
+    for (var task in tasks) {
+      print('Task: ${task['description']}, Date: ${task['date']}, Time: ${task['time']}');
+      final taskDateTime = DateTime.parse(
+          '${task['date'].split('/')[2]}-${task['date'].split('/')[1]}-${task['date'].split('/')[0]} '
+              '${task['time'].split(':')[0]}:${task['time'].split(':')[1]}:00');
+      if (task['date'] == currentDate &&
+          taskDateTime.difference(now).inMinutes.abs() <= 5) {
+        print('Match found: ${task['description']}');
+        newMatchedTasks.add(task);
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        matchedTasks = newMatchedTasks;
+      });
+      widget.onTasksMatched(matchedTasks);
+    }
+  }
+  Future<void> _scheduleNotifications() async {
+    print('Attempting to schedule notifications for ${tasks.length} tasks');
+    for (var task in tasks) {
+      final taskDateTime = DateTime.parse(
+          '${task['date'].split('/')[2]}-${task['date'].split('/')[1]}-${task['date'].split('/')[0]} '
+              '${task['time'].split(':')[0]}:${task['time'].split(':')[1]}:00');
+      if (taskDateTime.isAfter(DateTime.now())) {
+        try {
+          print('Scheduling exact alarm for ${task['description']} at ${taskDateTime}');
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            task['id'].hashCode,
+            'Rappel de tâche',
+            '${task['description']} à ${task['date']} ${task['time']}',
+            tz.TZDateTime.from(taskDateTime, tz.local),
+            const NotificationDetails(
+              android: AndroidNotificationDetails(
+                'task_channel_id',
+                'Task Reminders',
+                channelDescription: 'Notifications for task reminders',
+                importance: Importance.max,
+                priority: Priority.high,
+                showWhen: true,
+              ),
+            ),
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+            matchDateTimeComponents: DateTimeComponents.dateAndTime,
+          );
+          print('Successfully scheduled notification for ${task['description']} at ${task['date']} ${task['time']}');
+        } catch (e) {
+          print('Failed to schedule exact alarm for ${task['description']}: $e');
+          print('Attempting inexact alarm for ${task['description']}');
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            task['id'].hashCode,
+            'Rappel de tâche',
+            '${task['description']} à ${task['date']} ${task['time']}',
+            tz.TZDateTime.from(taskDateTime, tz.local),
+            const NotificationDetails(
+              android: AndroidNotificationDetails(
+                'task_channel_id',
+                'Task Reminders',
+                channelDescription: 'Notifications for task reminders',
+                importance: Importance.max,
+                priority: Priority.high,
+                showWhen: true,
+              ),
+            ),
+            androidScheduleMode: AndroidScheduleMode.inexact,
+            matchDateTimeComponents: DateTimeComponents.dateAndTime,
+          );
+          print('Successfully scheduled inexact notification for ${task['description']} as fallback');
+        }
+      } else {
+        print('Skipping notification for ${task['description']} as it is in the past');
+      }
+    }
+  }
   Future<void> _selectDateTime(BuildContext context) async {
     final DateTime? pickedDate = await showDatePicker(
       context: context,
@@ -66,7 +202,7 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
         context: context,
         initialTime: TimeOfDay.fromDateTime(_taskDateTime ?? DateTime.now()),
       );
-      if (pickedTime != null) {
+      if (pickedTime != null && mounted) {
         setState(() {
           _taskDateTime = DateTime(
             pickedDate.year,
@@ -96,11 +232,13 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
       _taskDescriptionController.text,
       _taskDateTime!,
     );
-    setState(() {
-      _taskDescriptionController.clear();
-      _taskDateTime = null;
-    });
-    await _loadTasks();
+    if (mounted) {
+      setState(() {
+        _taskDescriptionController.clear();
+        _taskDateTime = null;
+      });
+      await _loadTasks();
+    }
   }
 
   Future<void> _editTask(Map<String, dynamic> task) async {
@@ -162,9 +300,11 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
               };
               await _storage.updateTask(task['id'], newTask);
               Navigator.pop(context);
-              _taskDescriptionController.clear();
-              _taskDateTime = null;
-              await _loadTasks();
+              if (mounted) {
+                _taskDescriptionController.clear();
+                _taskDateTime = null;
+                await _loadTasks();
+              }
             },
             child: Text("Enregistrer", style: GoogleFonts.poppins()),
           ),
@@ -175,27 +315,8 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
 
   Future<void> _deleteTask(Map<String, dynamic> task) async {
     await _storage.deleteTask(task['id']);
-    await _loadTasks();
-  }
-
-  void _scheduleNotifications() {
-    for (var task in tasks) {
-      final taskTime = DateTime.parse(
-          '${task['date'].split('/')[2]}-${task['date'].split('/')[1]}-${task['date'].split('/')[0]} '
-              '${task['time'].split(':')[0]}:${task['time'].split(':')[1]}:00');
-      if (taskTime.isAfter(DateTime.now())) {
-        Future.delayed(taskTime.difference(DateTime.now()), () {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text("Rappel : ${task['description']} à ${task['date']} ${task['time']}"),
-                backgroundColor: const Color(0xFF1E90FF),
-              ),
-            );
-          }
-        });
-      }
-    }
+    await flutterLocalNotificationsPlugin.cancel(task['id'].hashCode);
+    if (mounted) await _loadTasks();
   }
 
   Widget _buildTextField(TextEditingController controller, String hint, IconData icon) {
@@ -216,6 +337,13 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
       ),
       style: GoogleFonts.poppins(color: Colors.white),
     );
+  }
+
+  @override
+  void dispose() {
+    _isPeriodicCheckRunning = false;
+    _taskDescriptionController.dispose();
+    super.dispose();
   }
 
   @override

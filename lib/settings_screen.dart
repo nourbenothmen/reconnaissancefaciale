@@ -7,12 +7,14 @@ class SettingsScreen extends StatelessWidget {
   final Map<String, dynamic> patientData;
   final String patientId;
   final VoidCallback onProfileUpdated;
+  final Function(List<Map<String, dynamic>>) onTasksMatched; // Add onTasksMatched parameter
 
   const SettingsScreen({
     Key? key,
     required this.patientData,
     required this.patientId,
     required this.onProfileUpdated,
+    required this.onTasksMatched, // Make it required
   }) : super(key: key);
 
   @override
@@ -91,6 +93,7 @@ class SettingsScreen extends StatelessWidget {
                       builder: (context) => TaskManagementScreen(
                         patientData: patientData,
                         patientId: patientId,
+                        onTasksMatched: onTasksMatched, // Pass the callback
                       ),
                     ),
                   );
